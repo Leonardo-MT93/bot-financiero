@@ -1,7 +1,18 @@
-const { addIncome, addExpense, getMonthlyExpenses } = require('./sheets');
+const { addIncome, addExpense, getMonthlyExpenses, addPartner, getPartnerData } = require('./sheets');
 
-// Estados de usuario (temporal, en memoria)
+// Estados de usuario (en memoria pero más robustos)
 const userStates = {};
+
+// Configuración de usuarios y parejas
+const userConfig = {};
+
+// Función para limpiar el estado del usuario
+function resetUserState(userPhone) {
+    userStates[userPhone] = { 
+        step: 'menu',
+        lastActivity: new Date()
+    };
+}
 
 // Función para validar montos
 function isValidAmount(text) {
@@ -16,8 +27,8 @@ function isValidAmount(text) {
     // Convertir a número
     const amount = parseInt(cleanText);
     
-    // Verificar que sea un monto razonable (entre 1 y 100 millones)
-    return amount >= 1 && amount <= 100000000;
+    // Verificar que sea un monto razonable (entre 1000 y 100 millones)
+    return amount >= 1000 && amount <= 100000000;
 }
 
 // Función para formatear números con puntos
@@ -35,18 +46,30 @@ async function handleMessage(from, body) {
     const userPhone = from.replace('whatsapp:', '');
     const message = body.trim().toLowerCase();
     
+    console.log(`📱 Mensaje de ${userPhone}: "${body}"`);
+    
     // Obtener o inicializar estado del usuario
     if (!userStates[userPhone]) {
-        userStates[userPhone] = { step: 'menu' };
+        resetUserState(userPhone);
     }
     
     const userState = userStates[userPhone];
+    console.log(`🔄 Estado actual: ${userState.step}`);
     
     try {
         // Si el usuario escribe "menu" en cualquier momento, resetear
-        if (message === 'menu') {
-            userStates[userPhone] = { step: 'menu' };
-            return getMainMenu();
+        if (message === 'menu' || message === 'menú') {
+            console.log(`🔄 Usuario ${userPhone} solicitó menú principal`);
+            resetUserState(userPhone);
+            return await getMainMenu(userPhone);
+        }
+
+        // Si el usuario escribe "estado" para debug
+        if (message === 'estado') {
+            return `🔍 DEBUG INFO:
+Estado: ${userState.step}
+Datos temporales: ${JSON.stringify(userState, null, 2)}
+Escribe "menu" para resetear.`;
         }
         
         // Manejar según el estado actual
@@ -76,38 +99,72 @@ async function handleMessage(from, body) {
                 return await handlePartnerPhone(userPhone, body.trim());
                 
             default:
-                userStates[userPhone] = { step: 'menu' };
-                return getMainMenu();
+                console.log(`❌ Estado desconocido: ${userState.step}, reseteando`);
+                resetUserState(userPhone);
+                return await getMainMenu(userPhone);
         }
     } catch (error) {
-        console.error('Error handling message:', error);
-        userStates[userPhone] = { step: 'menu' };
-        return 'Disculpa, hubo un error. Intenta nuevamente escribiendo *menu*.';
+        console.error('❌ Error handling message:', error);
+        resetUserState(userPhone);
+        return `❌ Disculpa, hubo un error. 
+
+${await getMainMenu(userPhone)}`;
     }
 }
 
-function getMainMenu() {
-    return `🏦 *GESTOR FINANCIERO PERSONAL*
+async function getMainMenu(userPhone) {
+    try {
+        // Obtener datos de la pareja si existe
+        const partnerData = await getPartnerData(userPhone);
+        
+        let menuText = `🏦 *GESTOR FINANCIERO PERSONAL*\n\n`;
+        
+        // Mostrar info de pareja si existe
+        if (partnerData && partnerData.partnerName) {
+            menuText += `👫 *PAREJA:* ${partnerData.partnerName}\n`;
+            if (partnerData.partnerSalary) {
+                menuText += `💰 *Su sueldo:* $${formatNumber(partnerData.partnerSalary)}\n`;
+            }
+            menuText += `\n`;
+        }
+
+        menuText += `1️⃣ Ingresar Sueldo
+2️⃣ Ingresar Gasto Compartido  
+3️⃣ Ingresar Gasto Individual
+4️⃣ Ver Gastos del Mes
+5️⃣ Configurar Pareja
+6️⃣ Resumen Financiero
+
+*Envía el número de la opción* 👆`;
+
+        return menuText;
+    } catch (error) {
+        console.error('Error getting main menu:', error);
+        return `🏦 *GESTOR FINANCIERO PERSONAL*
 
 1️⃣ Ingresar Sueldo
 2️⃣ Ingresar Gasto Compartido  
 3️⃣ Ingresar Gasto Individual
-4️⃣ Ver Gastos
+4️⃣ Ver Gastos del Mes
 5️⃣ Configurar Pareja
-6️⃣ Resumen del Mes
+6️⃣ Resumen Financiero
 
-Envía el número de la opción 👆`;
+*Envía el número de la opción* 👆`;
+    }
 }
 
 async function handleMenuOption(userPhone, option) {
+    console.log(`🎯 Procesando opción "${option}" para ${userPhone}`);
+    
     switch (option) {
         case '1':
             userStates[userPhone].step = 'waiting_salary';
+            console.log(`✅ Cambiando estado a: waiting_salary`);
             return `💰 *INGRESAR SUELDO*
 
 Por favor ingresa tu sueldo del mes.
 
-Ejemplos válidos:
+*Ejemplos válidos:*
 • 1400000
 • 1.400.000
 • 1,400,000
@@ -116,11 +173,12 @@ Escribe solo el número:`;
 
         case '2':
             userStates[userPhone].step = 'waiting_shared_expense_amount';
+            console.log(`✅ Cambiando estado a: waiting_shared_expense_amount`);
             return `👥 *GASTO COMPARTIDO*
 
 ¿Cuánto gastaron entre los dos?
 
-Ejemplos:
+*Ejemplos:*
 • 50000 (supermercado)
 • 25000 (cena)
 • 150000 (servicios)
@@ -129,11 +187,12 @@ Escribe el monto:`;
 
         case '3':
             userStates[userPhone].step = 'waiting_individual_expense_amount';
+            console.log(`✅ Cambiando estado a: waiting_individual_expense_amount`);
             return `🛍️ *GASTO INDIVIDUAL*
 
 ¿Cuánto gastaste solo/a?
 
-Ejemplos:
+*Ejemplos:*
 • 15000 (almuerzo)
 • 80000 (ropa)
 • 30000 (transporte)
@@ -141,61 +200,90 @@ Ejemplos:
 Escribe el monto:`;
 
         case '4':
-            const expenses = await getMonthlyExpenses();
+            console.log(`📊 Obteniendo gastos para ${userPhone}`);
+            const expenses = await getMonthlyExpenses(userPhone);
             return formatExpensesReport(expenses);
 
         case '5':
             userStates[userPhone].step = 'waiting_partner_name';
+            console.log(`✅ Cambiando estado a: waiting_partner_name`);
             return `👫 *CONFIGURAR PAREJA*
 
-¿Cómo se llama tu pareja?`;
+¿Cómo se llama tu pareja?
+
+Ejemplo: Maria, Juan, etc.
+
+Escribe el nombre:`;
 
         case '6':
-            const summary = await getMonthlyExpenses();
-            return formatMonthlySummary(summary);
+            console.log(`📈 Generando resumen para ${userPhone}`);
+            const summary = await getMonthlyExpenses(userPhone);
+            return await formatMonthlySummary(userPhone, summary);
 
         default:
-            return `❌ Opción no válida. 
+            console.log(`❌ Opción inválida: "${option}"`);
+            return `❌ *Opción no válida.*
 
-${getMainMenu()}`;
+Por favor elige un número del 1 al 6.
+
+${await getMainMenu(userPhone)}`;
     }
 }
 
 async function handleSalaryInput(userPhone, text) {
+    console.log(`💰 Procesando sueldo: "${text}" para ${userPhone}`);
+    
     if (!isValidAmount(text)) {
-        return `❌ Por favor ingresa un monto válido.
+        return `❌ *Monto inválido*
 
-Ejemplos:
+Por favor ingresa un monto válido.
+
+*Ejemplos correctos:*
 • 1400000
 • 850000  
 • 2500000
 
-Escribe solo números (sin letras ni símbolos):`;
+Escribe solo números (sin letras):`;
     }
     
     const amount = parseAmount(text);
+    console.log(`💰 Monto procesado: ${amount}`);
     
     try {
-        await addIncome(userPhone, amount, 'Sueldo');
-        userStates[userPhone] = { step: 'menu' };
+        const success = await addIncome(userPhone, amount, 'Sueldo');
+        console.log(`💰 Resultado guardado: ${success}`);
         
-        return `✅ *SUELDO REGISTRADO*
+        if (success) {
+            resetUserState(userPhone);
+            return `✅ *SUELDO REGISTRADO*
 
 💰 Monto: $${formatNumber(amount)}
 📅 Fecha: ${new Date().toLocaleDateString('es-AR')}
 
-${getMainMenu()}`;
+${await getMainMenu(userPhone)}`;
+        } else {
+            throw new Error('addIncome retornó false');
+        }
     } catch (error) {
-        console.error('Error adding income:', error);
-        return `❌ Error al guardar. Intenta nuevamente o escribe *menu*.`;
+        console.error('❌ Error guardando sueldo:', error);
+        resetUserState(userPhone);
+        return `❌ *Error al guardar*
+
+Hubo un problema guardando tu sueldo.
+
+${await getMainMenu(userPhone)}`;
     }
 }
 
 async function handleSharedExpenseAmount(userPhone, text) {
+    console.log(`👥 Procesando gasto compartido: "${text}"`);
+    
     if (!isValidAmount(text)) {
-        return `❌ Por favor ingresa un monto válido.
+        return `❌ *Monto inválido*
 
-Ejemplos: 50000, 25000, 150000
+Por favor ingresa un monto válido.
+
+*Ejemplos:* 50000, 25000, 150000
 
 Escribe solo números:`;
     }
@@ -204,13 +292,15 @@ Escribe solo números:`;
     userStates[userPhone].amount = amount;
     userStates[userPhone].step = 'waiting_shared_expense_description';
     
+    console.log(`👥 Monto guardado temporalmente: ${amount}, esperando descripción`);
+    
     return `💡 *DESCRIPCIÓN DEL GASTO*
 
 Monto: $${formatNumber(amount)}
 
 ¿En qué gastaron?
 
-Ejemplos:
+*Ejemplos:*
 • Supermercado
 • Cena restaurante  
 • Servicios casa
@@ -221,30 +311,41 @@ Escribe la descripción:`;
 
 async function handleSharedExpenseDescription(userPhone, description) {
     const amount = userStates[userPhone].amount;
+    console.log(`👥 Guardando gasto compartido: ${amount} - ${description}`);
     
     try {
-        await addExpense(userPhone, amount, description, 'compartido');
-        userStates[userPhone] = { step: 'menu' };
+        const success = await addExpense(userPhone, amount, description, 'compartido');
+        console.log(`👥 Resultado guardado: ${success}`);
         
-        return `✅ *GASTO COMPARTIDO REGISTRADO*
+        if (success) {
+            resetUserState(userPhone);
+            return `✅ *GASTO COMPARTIDO REGISTRADO*
 
 💰 Monto: $${formatNumber(amount)}
 📝 Descripción: ${description}
 👥 Tipo: Compartido
 📅 Fecha: ${new Date().toLocaleDateString('es-AR')}
 
-${getMainMenu()}`;
+${await getMainMenu(userPhone)}`;
+        } else {
+            throw new Error('addExpense retornó false');
+        }
     } catch (error) {
-        console.error('Error adding expense:', error);
-        return `❌ Error al guardar. Intenta nuevamente o escribe *menu*.`;
+        console.error('❌ Error guardando gasto compartido:', error);
+        resetUserState(userPhone);
+        return `❌ *Error al guardar*
+
+${await getMainMenu(userPhone)}`;
     }
 }
 
 async function handleIndividualExpenseAmount(userPhone, text) {
+    console.log(`🛍️ Procesando gasto individual: "${text}"`);
+    
     if (!isValidAmount(text)) {
-        return `❌ Por favor ingresa un monto válido.
+        return `❌ *Monto inválido*
 
-Ejemplos: 15000, 80000, 30000
+*Ejemplos:* 15000, 80000, 30000
 
 Escribe solo números:`;
     }
@@ -253,13 +354,15 @@ Escribe solo números:`;
     userStates[userPhone].amount = amount;
     userStates[userPhone].step = 'waiting_individual_expense_description';
     
+    console.log(`🛍️ Monto guardado temporalmente: ${amount}`);
+    
     return `💡 *DESCRIPCIÓN DEL GASTO*
 
 Monto: $${formatNumber(amount)}
 
 ¿En qué gastaste?
 
-Ejemplos:
+*Ejemplos:*
 • Almuerzo trabajo
 • Ropa personal
 • Transporte
@@ -270,35 +373,54 @@ Escribe la descripción:`;
 
 async function handleIndividualExpenseDescription(userPhone, description) {
     const amount = userStates[userPhone].amount;
+    console.log(`🛍️ Guardando gasto individual: ${amount} - ${description}`);
     
     try {
-        await addExpense(userPhone, amount, description, 'individual');
-        userStates[userPhone] = { step: 'menu' };
+        const success = await addExpense(userPhone, amount, description, 'individual');
+        console.log(`🛍️ Resultado guardado: ${success}`);
         
-        return `✅ *GASTO INDIVIDUAL REGISTRADO*
+        if (success) {
+            resetUserState(userPhone);
+            return `✅ *GASTO INDIVIDUAL REGISTRADO*
 
 💰 Monto: $${formatNumber(amount)}
 📝 Descripción: ${description}
 🛍️ Tipo: Individual
 📅 Fecha: ${new Date().toLocaleDateString('es-AR')}
 
-${getMainMenu()}`;
+${await getMainMenu(userPhone)}`;
+        } else {
+            throw new Error('addExpense retornó false');
+        }
     } catch (error) {
-        console.error('Error adding expense:', error);
-        return `❌ Error al guardar. Intenta nuevamente o escribe *menu*.`;
+        console.error('❌ Error guardando gasto individual:', error);
+        resetUserState(userPhone);
+        return `❌ *Error al guardar*
+
+${await getMainMenu(userPhone)}`;
     }
 }
 
 async function handlePartnerName(userPhone, name) {
+    if (!name || name.length < 2) {
+        return `❌ *Nombre inválido*
+
+Por favor ingresa un nombre válido.
+
+*Ejemplo:* Maria, Juan, etc.`;
+    }
+    
     userStates[userPhone].partnerName = name;
     userStates[userPhone].step = 'waiting_partner_phone';
+    
+    console.log(`👫 Nombre de pareja guardado: ${name}`);
     
     return `📱 *NÚMERO DE ${name.toUpperCase()}*
 
 ¿Cuál es el número de WhatsApp de ${name}?
 
-Formato: +54911XXXXXXXX
-Ejemplo: +5491123456789
+*Formato:* +549XXXXXXXXX
+*Ejemplo:* +5491123456789
 
 Escribe el número:`;
 }
@@ -306,57 +428,138 @@ Escribe el número:`;
 async function handlePartnerPhone(userPhone, phone) {
     const partnerName = userStates[userPhone].partnerName;
     
-    // Aquí podrías guardar en Google Sheets la configuración de pareja
-    userStates[userPhone] = { step: 'menu' };
+    // Validar formato básico de teléfono
+    if (!phone.includes('+549') || phone.length < 13) {
+        return `❌ *Número inválido*
+
+El formato debe ser: +549XXXXXXXXX
+
+*Ejemplo:* +5491123456789
+
+Intenta nuevamente:`;
+    }
     
-    return `✅ *PAREJA CONFIGURADA*
+    try {
+        const success = await addPartner(userPhone, partnerName, phone);
+        console.log(`👫 Pareja configurada: ${success}`);
+        
+        if (success) {
+            resetUserState(userPhone);
+            return `✅ *PAREJA CONFIGURADA*
 
 👫 Nombre: ${partnerName}
 📱 Teléfono: ${phone}
 
-Ahora ${partnerName} puede usar el bot con el mismo número y verán los gastos compartidos.
+Ahora ${partnerName} puede usar el bot y verán los gastos compartidos.
 
-${getMainMenu()}`;
+${await getMainMenu(userPhone)}`;
+        } else {
+            throw new Error('addPartner retornó false');
+        }
+    } catch (error) {
+        console.error('❌ Error configurando pareja:', error);
+        resetUserState(userPhone);
+        return `❌ *Error al configurar pareja*
+
+${await getMainMenu(userPhone)}`;
+    }
 }
 
 function formatExpensesReport(expenses) {
+    console.log(`📊 Formateando reporte de ${expenses ? expenses.length : 0} gastos`);
+    
     if (!expenses || expenses.length === 0) {
         return `📊 *GASTOS DEL MES*
 
-No hay gastos registrados este mes.
+❌ No hay gastos registrados este mes.
 
-${getMainMenu()}`;
+Prueba agregando algunos gastos primero.
+
+🔄 Escribe *menu* para volver al inicio.`;
     }
     
     let report = `📊 *GASTOS DEL MES*\n\n`;
     let totalShared = 0;
     let totalIndividual = 0;
     
-    expenses.forEach(expense => {
-        const amount = formatNumber(expense.amount);
-        report += `💰 $${amount} - ${expense.description}\n`;
-        report += `📅 ${expense.date} | ${expense.type === 'compartido' ? '👥' : '🛍️'} ${expense.type}\n\n`;
-        
-        if (expense.type === 'compartido') {
-            totalShared += expense.amount;
-        } else {
-            totalIndividual += expense.amount;
-        }
-    });
+    // Agrupar por tipo
+    const sharedExpenses = expenses.filter(e => e.type === 'compartido');
+    const individualExpenses = expenses.filter(e => e.type === 'individual');
     
-    report += `📈 *RESUMEN:*\n`;
+    if (sharedExpenses.length > 0) {
+        report += `👥 *GASTOS COMPARTIDOS:*\n`;
+        sharedExpenses.forEach(expense => {
+            const amount = formatNumber(expense.amount);
+            report += `• $${amount} - ${expense.description}\n`;
+            totalShared += expense.amount;
+        });
+        report += `\n`;
+    }
+    
+    if (individualExpenses.length > 0) {
+        report += `🛍️ *GASTOS INDIVIDUALES:*\n`;
+        individualExpenses.forEach(expense => {
+            const amount = formatNumber(expense.amount);
+            report += `• $${amount} - ${expense.description}\n`;
+            totalIndividual += expense.amount;
+        });
+        report += `\n`;
+    }
+    
+    report += `📈 *TOTALES:*\n`;
     report += `👥 Compartidos: $${formatNumber(totalShared)}\n`;
     report += `🛍️ Individuales: $${formatNumber(totalIndividual)}\n`;
-    report += `💯 Total: $${formatNumber(totalShared + totalIndividual)}\n\n`;
+    report += `💯 **Total General: $${formatNumber(totalShared + totalIndividual)}**\n\n`;
     
-    report += getMainMenu();
+    report += `🔄 Escribe *menu* para volver al inicio.`;
     
     return report;
 }
 
-function formatMonthlySummary(expenses) {
-    // Similar a formatExpensesReport pero con más análisis
-    return formatExpensesReport(expenses);
+async function formatMonthlySummary(userPhone, expenses) {
+    try {
+        const partnerData = await getPartnerData(userPhone);
+        
+        let summary = `📈 *RESUMEN FINANCIERO DEL MES*\n\n`;
+        
+        // Info de pareja
+        if (partnerData && partnerData.partnerName) {
+            summary += `👫 *PAREJA:* ${partnerData.partnerName}\n\n`;
+        }
+        
+        // Calcular totales
+        let totalShared = 0;
+        let totalIndividual = 0;
+        
+        if (expenses && expenses.length > 0) {
+            expenses.forEach(expense => {
+                if (expense.type === 'compartido') {
+                    totalShared += expense.amount;
+                } else {
+                    totalIndividual += expense.amount;
+                }
+            });
+        }
+        
+        summary += `💰 *GASTOS:*\n`;
+        summary += `👥 Compartidos: $${formatNumber(totalShared)}\n`;
+        summary += `🛍️ Individuales: $${formatNumber(totalIndividual)}\n`;
+        summary += `💯 Total: $${formatNumber(totalShared + totalIndividual)}\n\n`;
+        
+        // Si hay gastos compartidos, calcular división
+        if (totalShared > 0) {
+            const sharedPerPerson = totalShared / 2;
+            summary += `🔄 *DIVISIÓN DE GASTOS COMPARTIDOS:*\n`;
+            summary += `• Cada uno debe: $${formatNumber(sharedPerPerson)}\n\n`;
+        }
+        
+        summary += `🔄 Escribe *menu* para volver al inicio.`;
+        
+        return summary;
+    } catch (error) {
+        console.error('Error formatting monthly summary:', error);
+        return formatExpensesReport(expenses);
+    }
 }
 
 module.exports = { handleMessage };
