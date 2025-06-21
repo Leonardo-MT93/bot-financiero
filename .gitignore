@@ -1,0 +1,19 @@
+cat > .gitignore << 'EOF'
+# Variables de entorno
+.env
+.env.local
+.env.production
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+
+# Auth info
+auth_info/
+
+# IDE
+.vscode/
+.DS_Store
+EOF
