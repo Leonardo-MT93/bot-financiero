@@ -246,15 +246,15 @@ Este proyecto está bajo la Licencia MIT - ver [LICENSE](LICENSE) para detalles.
 ## 👨‍💻 Autor
 
 **Tu Nombre**
-- GitHub: [@tu-usuario](https://github.com/Leonardo-MT93)
-- LinkedIn: [Tu Perfil](https://www.linkedin.com/in/leonardo-manuel-tolaba/)
+- GitHub: [@Leonardo-MT](https://github.com/Leonardo-MT93)
+- LinkedIn: [Leonardo Tolaba](https://www.linkedin.com/in/leonardo-manuel-tolaba/)
 - Email: leonardotolaba.20@gmail.com
 
 ## ⭐ Agradecimientos
 
 - [Twilio](https://twilio.com) por la API de WhatsApp
 - [Google Sheets API](https://developers.google.com/sheets) por la base de datos gratuita
-- [Railway](https://railway.app) por el hosting gratuito
+- [Render](https://render.com) por el hosting gratuito
 
 ---
 
